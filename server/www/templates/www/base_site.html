@@ -543,11 +543,12 @@
     <div class="modal fade" id="modalLogin" tabindex="-1" role="dialog" aria-labelledby="modalLoginLabel">
         <div class="modal-dialog" role="document">
             <div class="modal-content">
-                <form action="/register" id="registration-form" method="post">
+                <form action="{% url 'www:login' %}" id="registration-form" method="post">
+                    {% csrf_token %}
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
                                 aria-hidden="true">&times;</span></button>
-                        <h4 class="modal-title" id="modalLoginLabel">Select Login Service</h4>
+                        <h4 class="modal-title" id="modalLoginLabel">Login</h4>
                     </div>
                     <div class="modal-body">
                         <div class="row">
@@ -555,9 +556,16 @@
                                 <div class="alert"></div>
                             </div>
                             <div class="col-sm-6 float-left">
-                                <a href="{% url 'www:login' service='google' %}" class="partner-box">
-                                    <img class="logo" src="{% static 'www/img/google.png' %}" width="100px" height="100px" alt="Google OAuth2">
-                                </a>
+                                <div class="form-group">
+                                    <input type="text" class="form-control" placeholder="Handle" id="handle" name="handle" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <div class="form-group">
+                                    <input type="password" class="form-control" placeholder="Password" id="creds" name="creds" required>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -585,10 +593,7 @@
                     </div>
                     <div class="modal-body">
                         <div class="row register-description">
-                            <p>To register, enter in a handle (username) and select which OAuth service you would like to use for authentication.</p>
-                            <p>FIRST only uses the OAuth2 service to associate your registation to an email address and to display your name.
-                            No other information is obtained through the service.</p>
-                            <p>Handles can only contain alphanumeric characters and underscores</p>
+                            <p>Registration</p>
                         </div>
                         <div class="row">
                             <div class="col-md-12" id="registration-msg" style="display:none;">
@@ -596,20 +601,21 @@
                             </div>
                             <div class="col-sm-6">
                                 <div class="form-group">
-                                    <input type="text" class="form-control" placeholder="Handle" id="handle" name="handle"
-                                           required>
+                                    <input type="text" class="form-control" placeholder="Handle" id="handle" name="handle" required>
                                 </div>
                             </div>
-
+                        </div>
+                        <div class="row">
                             <div class="col-sm-6">
                                 <div class="form-group">
-                                    <div class="select relative">
-                                        <i class="fa fa-angle-down"></i>
-                                        <select name="service" required>
-                                            <option value="" disabled selected style="display:none;">Choose OAuth2 Service</option>
-                                            <option value="google">Google</option>
-                                        </select>
-                                    </div>
+                                    <input type="email" class="form-control" placeholder="Email" id="email" name="email" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <div class="form-group">
+                                    <input type="password" class="form-control" placeholder="Password" id="creds" name="creds" required>
                                 </div>
                             </div>
                         </div>

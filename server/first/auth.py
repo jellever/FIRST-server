@@ -1,4 +1,4 @@
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 #
 #   FIRST Authentication module
 #   Copyright (C) 2016  Angel M. Villegas
@@ -21,19 +21,19 @@
 #   ------------
 #   -   mongoengine
 #
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 
 #   Python Modules
-import os
+import re
+import hashlib
 import uuid
-import json
-import random
+import time
 import datetime
 from functools import wraps
 
 #   Django Modules
 from django.http import HttpResponse, HttpRequest
-from django.shortcuts import render, redirect
+from django.shortcuts import redirect
 from django.urls import reverse
 
 #   FIRST Modules
@@ -42,11 +42,9 @@ from first.models import User
 from first.error import FIRSTError
 
 #   Thirdy Party
-import httplib2
-from oauth2client import client
-from apiclient import discovery
 from mongoengine.queryset import DoesNotExist
 
+BUILTIN_SERVICE = 'BUILTIN'
 
 
 class FIRSTAuthError(FIRSTError):
@@ -107,35 +105,15 @@ def require_login(view_function):
 
 
 class Authentication():
-    '''
-    self.request.session['auth'] = {'expires' : time token expires,
-                                    'api_key' : uuid from users db
-
-    }
-
-    '''
-
     def __init__(self, request):
         self.request = request
-        redirect_uri = request.build_absolute_uri(reverse('www:oauth', kwargs={'service' : 'google'}))
-        secret = os.environ.get('GOOGLE_SECRET', '/usr/local/etc/google_secret.json')
-        try:
-            self.flow = {'google' : client.flow_from_clientsecrets(secret,
-                                    scope=['https://www.googleapis.com/auth/userinfo.profile',
-                                            'https://www.googleapis.com/auth/userinfo.email'],
-                                    redirect_uri=redirect_uri),
-                }
-        except TypeError as e:
-            print e
-
         if 'auth' not in request.session:
             request.session['auth'] = {}
-
+        self.request.session['auth']['service'] = BUILTIN_SERVICE
 
     @property
     def is_logged_in(self):
-        if (('auth' not in self.request.session)
-            or ('expires' not in self.request.session['auth'])):
+        if (('auth' not in self.request.session) or ('expires' not in self.request.session['auth'])):
             return False
 
         expires = datetime.datetime.fromtimestamp(self.request.session['auth']['expires'])
@@ -144,124 +122,62 @@ class Authentication():
 
         return True
 
+    def login(self, url):
+        handle = self.request.POST.get('handle')
+        passwd = self.request.POST.get('creds')
+        pass_hash = hashlib.sha256(passwd).hexdigest()
+        try:
+            user = User.objects.get(handle=handle, auth_data=pass_hash, service=BUILTIN_SERVICE)
+        except DoesNotExist:
+            user = None
+        if not user:
+            raise FIRSTAuthError('Login failed')
+        self.request.session['info'] = {
+            'name': user.name,
+            'email': user.email
+        }
 
-    def login_step_1(self, service, url):
-        '''
-        Called when user attempts to login with a service
-
-        Function redirects to service to allow user to login, then redirects
-        to the specified url
-        '''
-        if 'google' == service:
-            self.request.session['auth']['service'] = 'google'
-            auth_uri = self.flow['google'].step1_get_authorize_url()
-            return redirect(auth_uri)
-
-        raise FIRSTAuthError('Authentication service is not supported')
-
-
-    def login_step_2(self, auth_code, url, login=True):
-        '''
-        Called when a service returns after a user logs in
-        '''
-        if (('auth' not in self.request.session)
-            or ('service' not in self.request.session['auth'])):
-            raise FIRSTAuthError('Authentication service is not supported')
-
-        service = self.request.session['auth']['service']
-        if 'google' == service:
-            credentials = self.flow['google'].step2_exchange(auth_code).to_json()
-            self.request.session['creds'] = credentials
-
-            oauth = client.OAuth2Credentials.from_json(credentials)
-            credentials = json.loads(credentials)
-
-            if not oauth.access_token_expired:
-                http_auth = oauth.authorize(httplib2.Http())
-                service = discovery.build('plus', 'v1', http_auth)
-                info = service.people().get(userId='me', fields='displayName,emails')
-                info = info.execute()
-                email = info['emails'][0]['value']
-                self.request.session['info'] = {'name' : info['displayName'],
-                                                'email' : email}
-
-                expires = credentials['id_token']['exp']
-                #expires = datetime.datetime.fromtimestamp(expires)
-                self.request.session['auth']['expires'] = expires
-
-                if login:
-                    try:
-                        user = User.objects.get(email=email)
-                        user.auth_data = json.dumps(credentials)
-                        user.name = info['displayName']
-                        user.save()
-
-                        self.request.session['auth']['api_key'] = str(user.api_key)
-
-                        return redirect(url)
-
-                    except DoesNotExist:
-                        self.request.session.flush()
-                        raise FIRSTAuthError('User is not registered.')
-
-            return redirect(url)
-
-        return redirect('www:login')
+        expire = datetime.datetime.now() + datetime.timedelta(days=1)
+        self.request.session['auth']['expires'] = time.mktime(expire.timetuple())
+        self.request.session['auth']['api_key'] = str(user.api_key)
+        return redirect(url)
 
     def register_user(self):
         request = self.request
-        required = ['handle', 'auth', 'info', 'creds']
-        if False in [x in request.session for x in required]:
-            return None
-
-        if False in [x in request.session['info'] for x in ['email', 'name']]:
-            return None
-
-        if 'service' not in request.session['auth']:
-            return None
+        required = ['handle', 'creds', 'email']
+        if False in [x in request.POST for x in required]:
+            return HttpResponse('Error: Missing fields!')
 
         user = None
-        handle = request.session['handle']
-        service = request.session['auth']['service']
-        name = request.session['info']['name']
-        email = request.session['info']['email']
-        credentials = request.session['creds']
+        handle = request.POST['handle']
+        service = BUILTIN_SERVICE
+        name = request.POST['handle']
+        email = request.POST['email']
+        credentials = hashlib.sha256(request.POST['creds']).hexdigest()
 
-        while not user:
-            api_key = uuid.uuid4()
+        if len(request.POST['creds']) < 8:
+            raise FIRSTAuthError('Password must be >= 8 characters')
+        if not re.match('^[A-Za-z_\d]+$', handle):
+            return FIRSTAuthError('Invalid handle')
 
-            #   Test if UUID exists
-            try:
-                user = User.objects.get(api_key=api_key)
-                user = None
-                continue
+        api_key = uuid.uuid4()
 
-            except DoesNotExist:
-                pass
+        try:
+            user = User.objects.get(handle=handle)
+            raise FIRSTAuthError('User already exists!')
+        except DoesNotExist:
+            user = User(name=name,
+                        api_key=api_key,
+                        email=email,
+                        handle=handle,
+                        number=0,
+                        service=service,
+                        auth_data=credentials)
 
-            #   Create random 4 digit value for the handle
-            #   This prevents handle collisions
-            number = random.randint(0, 9999)
-            for i in xrange(10000):
-                try:
-                    num = (number + i) % 10000
-                    user = User.objects.get(handle=handle, number=num)
-                    user = None
-
-                except DoesNotExist:
-                    user = User(name=name,
-                                email=email,
-                                api_key=api_key,
-                                handle=handle,
-                                number=num,
-                                service=service,
-                                auth_data=credentials)
-
-                    user.save()
-                    return user
+            user.save()
+            return redirect(reverse('www:index'), _anchor='login')
 
         raise FIRSTAuthError('Unable to register user')
-
 
     @staticmethod
     def get_user_data(email):

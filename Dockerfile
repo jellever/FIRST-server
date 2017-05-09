@@ -10,7 +10,7 @@ COPY ./server /home/first
 RUN chown first:first /home/first
 
 COPY install/vhost.conf /etc/apache2/sites-available/first.conf
-COPY install/google_secret.json /usr/local/etc
+
 
 RUN /usr/sbin/a2dissite 000-default
 RUN /usr/sbin/a2ensite first
